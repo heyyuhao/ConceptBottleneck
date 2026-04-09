@@ -1,0 +1,7 @@
+"submission_id"	"dataset_id"	"collection_id"	"collection_title"	"pi_list"
+"submission_id"	"dataset_id"	"collection_id"	"collection_title"	"pi_list"
+"50638"	"53493"	"2343"	"Osteoarthritis Initiative"	"Multiple"
+"52744"	"55677"	"2343"	"Osteoarthritis Initiative"	"Multiple"
+"48564"	"51170"	"2343"	"Osteoarthritis Initiative"	"Multiple"
+"50964"	"53834"	"2343"	"Osteoarthritis Initiative"	"Multiple"
+"53146"	"56486"	"2343"	"Osteoarthritis Initiative"	"Multiple"
