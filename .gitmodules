@@ -1,6 +1,6 @@
 [submodule "submodule/nda-tools"]
 	path = submodule/nda-tools
-	url = git@github.com:heyyuhao/nda-tools.git
+	url = https://github.com/heyyuhao/nda-tools.git
 [submodule "submodule/pain-disparities"]
 	path = submodule/pain-disparities
-	url = git@github.com:heyyuhao/pain-disparities.git
+	url = https://github.com/heyyuhao/pain-disparities.git

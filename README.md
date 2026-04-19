@@ -90,9 +90,23 @@ submodule/
 └── nda-tools/          # NDA download tooling
 ```
 
-To initialise submodules after cloning:
+To initialise submodules after cloning (SSH is unavailable in this environment, so use HTTPS with credentials):
 ```bash
-git submodule update --init --recursive
+# 1. Switch submodule URLs to HTTPS
+sed -i 's|git@github.com:|https://github.com/|g' .gitmodules
+
+# 2. Set credentials for private repos (replace TOKEN with your GitHub PAT)
+git config submodule.submodule/nda-tools.url https://USERNAME:TOKEN@github.com/heyyuhao/nda-tools.git
+git config submodule.submodule/pain-disparities.url https://USERNAME:TOKEN@github.com/heyyuhao/pain-disparities.git
+
+# 3. Sync and clone
+git submodule sync
+git submodule update --init -- submodule/nda-tools
+git submodule update --init -- submodule/pain-disparities
+
+# 4. If a submodule directory is empty after the above, force a checkout
+git -C submodule/nda-tools checkout HEAD
+git -C submodule/pain-disparities checkout HEAD
 ```
 
 ---
