@@ -1,59 +1,105 @@
-# Concept Bottleneck Models
+# Concept Bottleneck Models — Fork
 
-![teaser](https://github.com/yewsiang/ConceptBottleneck/blob/master/figures/teaser_landscape.png)
+This is a fork of [yewsiang/ConceptBottleneck](https://github.com/yewsiang/ConceptBottleneck) (Koh et al., ICML 2020). For the original paper, datasets, CUB experiments, and Docker setup, refer to the upstream README and repo.
 
-This repository contains code and scripts for the following paper:
+---
 
-> Concept Bottleneck Models
->
-> Pang Wei Koh\*, Thao Nguyen\*, Yew Siang Tang\*, Stephen Mussmann, Emma Pierson, Been Kim, and Percy Liang
->
-> ICML 2020
+## Changes in this fork
 
-The experiments use the following datasets:
-- [NIH Osteoarthritis Initiative (OAI)](https://nda.nih.gov/oai/)
-- [Caltech-UCSD Birds 200 (CUB)](http://www.vision.caltech.edu/visipedia/CUB-200.html)
+### OAI data pipeline (`data/OAI/scripts/`)
 
-To download the TravelingBirds dataset, which we use to test robustness to background shifts, please download the `CUB_fixed` folder from this [CodaLab bundle](https://worksheets.codalab.org/bundles/0x518829de2aa440c79cd9d75ef6669f27) by clicking on the download button. If you use this dataset, please also cite the original CUB and Places datasets.
+The upstream repo pointed to [epierson9/pain-disparities](https://github.com/epierson9/pain-disparities) for OAI data processing without providing runnable scripts. This fork adds a complete, self-contained data preparation pipeline for the OAI dataset.
 
-The NIH Osteoarthritis Initiative (OAI) dataset requires an application for data access, so we are unable to provide the raw data here. To access that data, please first obtain data access permission from the [Osteoarthritis Initiative](https://nda.nih.gov/oai/), and then refer to this [Github repository](https://github.com/epierson9/pain-disparities) for data processing code. If you use it, please cite the Pierson et al. paper corresponding to that repository as well.
+#### Scripts
 
-Here, we focus on scripts replicating our results on CUB, which is public. We provide an executable, Dockerized version of those experiments on [CodaLab](https://worksheets.codalab.org/worksheets/0x362911581fcd4e048ddfd84f47203fd2).
+| Script | Description |
+|---|---|
+| `data/OAI/scripts/1_download_data.ipynb` | Download raw OAI DICOM images and label files via NDA |
+| `data/OAI/scripts/2_check_downloaded_data.ipynb` | Verify downloaded DICOMs, inspect DICOM tags, check label coverage |
+| `data/OAI/scripts/3_prepare_data.ipynb` | Full preprocessing pipeline → produces `manifest.csv` + `.npy` images |
 
-## Abstract
+#### `3_prepare_data.ipynb` — what it does
 
-We seek to learn models that we can interact with using high-level concepts:
-would the model predict severe arthritis if it thinks there is a bone spur in the x-ray?
-State-of-the-art models today do not typically support the manipulation of concepts like "the existence of bone spurs",
-as they are trained end-to-end to go directly from raw input (e.g., pixels) to output (e.g., arthritis severity).
-We revisit the classic idea of first predicting concepts that are provided at training time,
-and then using these concepts to predict the label.
-By construction, we can intervene on these _concept bottleneck models_
-by editing their predicted concept values and propagating these changes to the final prediction.
-On x-ray grading and bird identification, concept bottleneck models achieve competitive accuracy with standard end-to-end models,
-while enabling interpretation in terms of high-level clinical concepts ("bone spurs") or bird attributes ("wing color").
-These models also allow for richer human-model interaction: accuracy improves significantly if we can correct model mistakes on concepts at test time.
+Builds `(X, y)` pairs from raw OAI DICOMs and `oai_kxrsemiquant01.txt`, using preprocessing functions directly from the pain-disparities submodule (`submodule/pain-disparities/`).
 
-![teaser](https://github.com/yewsiang/ConceptBottleneck/blob/master/figures/tti_qual_examples.png)
+**Step 1 — Find valid pairs**
+- Walks `ROOT_DIR` for all DICOM `001` files, filters to `BodyPartExamined == KNEE`
+- Loads `oai_kxrsemiquant01.txt` (tab-separated, skip description row 2)
+- Applies `readprj` filter (`readprj==15` for timepoints 00–48m; recodes `readprj==42→37` per OAI notes)
+- Maps side codes `{1: right, 2: left}` — same as `NonImageData.side_mappings`
+- Inner joins on `(src_subject_id, interview_date)` → one row per knee side
 
-## Prerequisites
-We used the same environment as Codalab's default gpu setting, please run `pip install -r requirements.txt`. Main packages are:
-- matplotlib 3.1.1
-- numpy 1.17.1
-- pandas 0.25.1
-- Pillow 6.2.2
-- scipy 1.3.1
-- scikit-learn 0.21.3
-- torch 1.1.0
-- torchvision 0.4.0
+**Step 2 — Image preprocessing** (via `XRayImageDataset` from pain-disparities)
+- Patches `constants_and_util.py` path guards before import (avoids `assert os.path.exists` failures)
+- Instantiates a minimal `XRayImageDataset` proxy without the full directory structure
+- `get_resized_pixel_array_from_dicom_image()` — resize to 1024×1024 (bilinear, `cv2`)
+- `compute_dataset_image_statistics_and_divide_by_max()` — divide by global max → [0, 1], compute dataset mean/std
+- `cut_images_in_two()` → `cut_image_in_half()` — split bilateral image with 1.1× margin; radiological convention: right side of film = patient's left knee
+- `make_images_RGB_and_zscore()` — replicate grayscale → (3, H, W) RGB, z-score with dataset-wide stats
+- Saves as `{subject_id}_{side}.npy`, shape `(3, 1024, ~563)`; skips already-processed files (re-runnable)
+- Saves `stats.json` with `global_max`, `global_mean`, `global_std`
 
-Note that we updated Pillow and removed tensorflow-gpu and tensorboard from requirements.txt.  
+**Step 3 — Label processing** (mirrors `NonImageData.load_semiquantitative_xray_data()`)
+- Numeric coercion of all label columns
+- JSN truncation: floor fractional grades (e.g. 1.4→1) — JSN annotations use fractions to indicate progression within a grade, not fractional severity
+- Fill non-JSN/non-KLG concept columns with 0 for participants who never had `xrkl >= 2` at any recorded timepoint; drop rows where a KLG≥2 participant is missing concept scores (mirrors pain-disparities logic)
+- Drop rows missing `xrkl`
+- KLG merge: 0+1→0, shift others down → 4-level label (0–3) for CBM target
 
-### Docker
-You can pull the Docker image directly from Docker Hub.
+**Step 4 — Manifest**
+- Saves `data/OAI/processed/manifest.csv` with columns:
+  - Identifiers: `src_subject_id`, `interview_date`, `visit`, `side`, `readprj`, `barcode`
+  - Paths: `dicom_path`, `processed_image_path`
+  - Label: `xrkl` (raw), `xrkl_merged` (4-level)
+  - 10 kept concepts: `xrosfm xrscfm xrjsm xrostm xrsctm xrosfl xrscfl xrjsl xrostl xrsctl`
+  - 8 reference concepts (low sparsity, kept for reference): `xrcyfm xrchm xrcytm xrattm xrcyfl xrchl xrcytl xrattl`
+
+#### Labels and concepts
+
+The 10 kept concepts pass a ≥95% sparsity filter (used in CBM training). The 8 reference concepts are retained in the CSV but not used as CBM concept targets. KLG (Kellgren-Lawrence Grade) is the primary task label.
+
+| Column | Description |
+|---|---|
+| `xrkl` / `xrkl_merged` | KL grade (raw 0–4 / merged 0–3) |
+| `xrjsm` / `xrjsl` | Joint space narrowing, medial / lateral |
+| `xrosfm` / `xrosfl` | Osteophytes, femoral medial / lateral |
+| `xrscfm` / `xrscfl` | Subchondral sclerosis, femoral medial / lateral |
+| `xrostm` / `xrostl` | Osteophytes, tibial medial / lateral |
+| `xrsctm` / `xrsctl` | Subchondral sclerosis, tibial medial / lateral |
+
+#### Directory structure
+
 ```
-docker pull codalab/default-gpu
+data/OAI/
+├── 1243742/image03/          # raw DICOM downloads (one per timepoint folder)
+│   └── 12m/1.E.1/{subject_id}/{yyyymmdd}/{series}/001
+├── Package_1243743/
+│   └── oai_kxrsemiquant01.txt   # semi-quantitative X-ray label file
+└── processed/
+    ├── manifest.csv             # all (X, y) pairs with metadata
+    ├── stats.json               # normalisation constants
+    └── images/
+        └── {subject_id}_{side}.npy   # shape (3, 1024, ~563), float32
 ```
 
-## Usage
-Standard task training for CUB can be ran using the `scripts/experiments.sh` and Codalab scripts can be ran using `scripts/codalab_experiments.sh`. More information about how to perform data processing and other evaluations can be found in the README in `CUB/`.
+#### Submodules
+
+```
+submodule/
+├── pain-disparities/   # Pierson et al. 2019 — image + label preprocessing code
+└── nda-tools/          # NDA download tooling
+```
+
+To initialise submodules after cloning:
+```bash
+git submodule update --init --recursive
+```
+
+---
+
+## Original repo
+
+See [yewsiang/ConceptBottleneck](https://github.com/yewsiang/ConceptBottleneck) for:
+- Paper abstract, CUB experiments, Docker setup
+- `CUB/README.md` for CUB data processing and evaluation
+- `OAI/README.md` for original OAI experiment commands
